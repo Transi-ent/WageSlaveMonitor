@@ -3,6 +3,7 @@
 [中文说明](README.zh-CN.md)
 
 ## Introduction
+
 As a humble wage slave, have you ever been bothered by your company's monitoring software? As the saying goes: Know your enemy, know yourself, and you shall never lose a battle. This project is exactly such a tool — its name is WageSlaveMonitor.
 
 WageSlaveMonitor is a lightweight **Windows client + Linux server** system for **authorized** endpoint operations and audit scenarios. The Windows agent periodically captures **all connected displays**, uploads JPEG screenshots to the server, and **buffers locally when offline** until the network returns. The server stores images on disk with **SQLite** metadata, exposes a simple **HTTP API**, and provides a **web console** to browse clients grouped by ID and screenshots sorted by time. Remote **capture interval** can be adjusted from the server side.
@@ -18,7 +19,7 @@ WageSlaveMonitor is a lightweight **Windows client + Linux server** system for *
 | **Offline resilience** | Failed uploads stay in a local file spool under `AGENT_DATA_DIR/spool` and flush when connectivity returns. |
 | **Lightweight server** | Single Go binary: SQLite index + filesystem blobs; optional retention job (`RETENTION_DAYS`). |
 | **Web console** | List clients, drill into timeline (newest first), preview images; form to update capture interval. |
-| **Console login** | Optional `CONSOLE_PASSWORD` with cookie session; API still accepts `Authorization: Bearer` when `AUTH_TOKEN` is set. |
+| **Console login** | Default password `123456` (stored as bcrypt in SQLite on first run); change it after login via **Change password**. Cookie session; API still accepts `Authorization: Bearer` when `AUTH_TOKEN` is set. |
 | **Windows service** | `install` / `uninstall` subcommands register `WageSlaveMonitorAgent` via `sc.exe` (run elevated). |
 | **Ops** | `GET /healthz`, request logging, Linux `systemd` example in [docs/deployment-linux.md](docs/deployment-linux.md). |
 
@@ -39,21 +40,23 @@ cd server
 go run ./cmd/server
 ```
 
-Default listen address: `:8080`. Data directory: `./data` (override with `DATA_DIR`).
+Server configuration is read from `server/config/config.json` (relative to the `server/` directory).
 
-**Useful environment variables**
+Key configuration fields:
 
-| Variable | Description |
-|----------|-------------|
+| Field | Description |
+|-------|-------------|
 | `ADDR` | Listen address (default `:8080`). |
 | `DATA_DIR` | Root for screenshots and DB (default `./data`). |
-| `DB_PATH` | SQLite path (default `$DATA_DIR/meta.db`). |
+| `DB_PATH` | SQLite path (default `./data/meta.db`). |
 | `AUTH_TOKEN` | If set, client API requires `Authorization: Bearer <token>`. |
-| `CONSOLE_PASSWORD` | If set, browser console requires login at `/console/login`. |
 | `DEFAULT_CAPTURE_INTERVAL_SECONDS` | Default interval for new clients (default `30`). |
 | `RETENTION_DAYS` | Delete screenshots older than this many days (default `14`). |
+| `CONSOLE_AUTH_DISABLED` | Set to `true` to disable console login (default `true` for easy testing). |
 
-**Production on Linux** (build, systemd, env file): follow [docs/deployment-linux.md](docs/deployment-linux.md).
+To enable password protection, set `CONSOLE_AUTH_DISABLED` to `false` in the config file. The default password is `123456`.
+
+**Production on Linux** (build, systemd, config file): follow [docs/deployment-linux.md](docs/deployment-linux.md).
 
 ### Client (Windows)
 
@@ -78,12 +81,12 @@ go build -o WageSlaveAgent.exe .\cmd\agent
 .\WageSlaveAgent.exe uninstall
 ```
 
-Configure the service’s environment (e.g. `SERVER_BASE_URL`, `AUTH_TOKEN`) via your deployment method or `sc.exe` config as needed.
+Configure the service's environment (e.g. `SERVER_BASE_URL`, `AUTH_TOKEN`) via your deployment method or `sc.exe` config as needed.
 
 ### Web console
 
 1. Open `http://YOUR_SERVER:8080/console/clients`.
-2. If `CONSOLE_PASSWORD` is set, you will be redirected to `/console/login`; sign in with that password.
+2. If `CONSOLE_AUTH_DISABLED` is `false` in the server config, sign in with the initial password **`123456`**, then use **Change password** in the top bar to set a strong password (minimum 6 characters).
 3. Click a client to view screenshots (newest first) and adjust **Capture interval** via the form.
 
 **API (optional, for automation)**

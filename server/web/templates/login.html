@@ -4,6 +4,7 @@
 
 {{define "content"}}
 <h1>Console Login</h1>
+<p style="color:#555;font-size:14px;">Initial password is <strong>123456</strong> until you change it in the console.</p>
 {{if .Error}}<p style="color:red">{{.Error}}</p>{{end}}
 <form method="post" action="/console/login">
   <label>Password:</label>

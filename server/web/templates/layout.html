@@ -13,6 +13,13 @@
   </style>
 </head>
 <body>
+  {{if .ShowNav}}
+  <p style="margin-bottom:16px;">
+    <a href="/console/clients">Clients</a>
+    ·
+    <a href="/console/change-password">Change password</a>
+  </p>
+  {{end}}
   {{template "content" .}}
 </body>
 </html>

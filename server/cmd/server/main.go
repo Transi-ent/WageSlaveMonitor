@@ -6,23 +6,28 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"wageslavemonitor/server/internal/api"
+	"wageslavemonitor/server/internal/config"
 	"wageslavemonitor/server/internal/store"
 )
 
 func main() {
-	addr := getenv("ADDR", ":8080")
-	dataDir := getenv("DATA_DIR", "./data")
-	dbPath := getenv("DB_PATH", filepath.Join(dataDir, "meta.db"))
-	authToken := os.Getenv("AUTH_TOKEN")
-	consolePassword := os.Getenv("CONSOLE_PASSWORD")
-	defaultInterval := getenvInt("DEFAULT_CAPTURE_INTERVAL_SECONDS", 30)
-	retentionDays := getenvInt("RETENTION_DAYS", 14)
+	cfgPath := getenv("CONFIG_PATH", "./config/config.json")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	addr := cfg.Addr
+	dataDir := cfg.DataDir
+	dbPath := cfg.DBPath
+	authToken := cfg.AuthToken
+	defaultInterval := cfg.DefaultCaptureIntervalSeconds
+	retentionDays := cfg.RetentionDays
+	consoleAuthDisabled := cfg.ConsoleAuthDisabled
 
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		log.Fatal(err)
@@ -98,10 +103,15 @@ func main() {
 		DataDir:     dataDir,
 		TemplateDir: "./web/templates",
 	}
-	if err := console.Register(mux, authToken); err != nil {
+	if err := console.Register(mux, authToken, consoleAuthDisabled); err != nil {
 		log.Fatal(err)
 	}
-	mux.Handle("/data/", api.RequireConsoleAuth(http.StripPrefix("/data/", http.FileServer(http.Dir(dataDir))).ServeHTTP, authToken, consolePassword))
+	mux.Handle("/data/", api.RequireConsoleAuth(
+		http.StripPrefix("/data/", http.FileServer(http.Dir(dataDir))).ServeHTTP,
+		authToken,
+		db,
+		consoleAuthDisabled,
+	))
 
 	go runRetentionJob(db, fs, retentionDays)
 
@@ -140,15 +150,6 @@ func loggingMiddleware(next http.Handler) http.Handler {
 func getenv(k, d string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
-	}
-	return d
-}
-
-func getenvInt(k string, d int) int {
-	if v := os.Getenv(k); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil {
-			return parsed
-		}
 	}
 	return d
 }

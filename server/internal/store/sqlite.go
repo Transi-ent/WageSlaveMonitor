@@ -6,7 +6,15 @@ import (
 	"errors"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
+)
+
+const DefaultConsolePassword = "123456"
+
+const (
+	consolePasswordBcryptKey     = "console_password_bcrypt"
+	consolePasswordCustomizedKey = "console_password_customized"
 )
 
 type ClientConfig struct {
@@ -67,8 +75,91 @@ CREATE TABLE IF NOT EXISTS screenshots (
     uploaded_at DATETIME NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_screenshots_client_time ON screenshots(client_id, captured_at DESC);
+CREATE TABLE IF NOT EXISTS server_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 `
 	_, err := s.db.ExecContext(ctx, schema)
+	if err != nil {
+		return err
+	}
+	return s.ensureDefaultConsolePassword(ctx)
+}
+
+func (s *SQLiteStore) ensureDefaultConsolePassword(ctx context.Context) error {
+	// 1) Ensure a bcrypt hash exists.
+	var count int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM server_settings WHERE key = ?`, consolePasswordBcryptKey).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		if err := s.setConsolePasswordBcrypt(ctx, DefaultConsolePassword); err != nil {
+			return err
+		}
+	}
+
+	// 2) If the user has explicitly customized the password, do not overwrite.
+	var customizedCount int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM server_settings WHERE key = ?`, consolePasswordCustomizedKey).Scan(&customizedCount); err != nil {
+		return err
+	}
+	if customizedCount > 0 {
+		return nil
+	}
+
+	// 3) If not customized and the stored hash doesn't match the default password, reset to default.
+	ok, err := s.VerifyConsolePassword(ctx, DefaultConsolePassword)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	return s.setConsolePasswordBcrypt(ctx, DefaultConsolePassword)
+}
+
+func (s *SQLiteStore) GetConsolePasswordBcrypt(ctx context.Context) (string, error) {
+	var v string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM server_settings WHERE key = ?`, consolePasswordBcryptKey).Scan(&v)
+	return v, err
+}
+
+func (s *SQLiteStore) VerifyConsolePassword(ctx context.Context, plaintext string) (bool, error) {
+	hashStr, err := s.GetConsolePasswordBcrypt(ctx)
+	if err != nil {
+		return false, err
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(hashStr), []byte(plaintext)); err != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (s *SQLiteStore) SetConsolePassword(ctx context.Context, plaintext string) error {
+	if len(plaintext) < 6 {
+		return errors.New("password must be at least 6 characters")
+	}
+	if err := s.setConsolePasswordBcrypt(ctx, plaintext); err != nil {
+		return err
+	}
+	// Mark as customized so Init will keep the user-chosen password.
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO server_settings(key, value) VALUES(?, '1')
+ON CONFLICT(key) DO UPDATE SET value='1'
+`, consolePasswordCustomizedKey)
+	return err
+}
+
+func (s *SQLiteStore) setConsolePasswordBcrypt(ctx context.Context, plaintext string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(plaintext), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO server_settings(key, value) VALUES(?, ?)
+ON CONFLICT(key) DO UPDATE SET value = excluded.value
+`, consolePasswordBcryptKey, string(hash))
 	return err
 }
 

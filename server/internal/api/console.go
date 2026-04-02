@@ -4,7 +4,6 @@ import (
 	"context"
 	"html/template"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,42 +18,119 @@ type ConsoleHandler struct {
 	TemplateDir string
 }
 
-func (h *ConsoleHandler) Register(mux *http.ServeMux, token string) error {
-	tpl, err := template.ParseFiles(
-		filepath.Join(h.TemplateDir, "layout.html"),
-		filepath.Join(h.TemplateDir, "clients.html"),
-		filepath.Join(h.TemplateDir, "client_detail.html"),
-		filepath.Join(h.TemplateDir, "login.html"),
-	)
+func (h *ConsoleHandler) Register(mux *http.ServeMux, token string, consoleAuthDisabled bool) error {
+	// IMPORTANT:
+	// Each page file defines a template named "content". If we parse all pages into one
+	// template set, the last parsed "content" wins and every page renders the same content.
+	// To avoid this, we parse a base layout, then CLONE + parse the page file per page.
+	base, err := template.ParseFiles(filepath.Join(h.TemplateDir, "layout.html"))
 	if err != nil {
 		return err
 	}
 
-	consolePassword := getenv("CONSOLE_PASSWORD", "")
+	type pageTemplates struct {
+		login          *template.Template
+		changePassword *template.Template
+		clients        *template.Template
+		clientDetail   *template.Template
+	}
+
+	buildPage := func(pageFile string) (*template.Template, error) {
+		t, err := base.Clone()
+		if err != nil {
+			return nil, err
+		}
+		_, err = t.ParseFiles(filepath.Join(h.TemplateDir, pageFile))
+		if err != nil {
+			return nil, err
+		}
+		return t, nil
+	}
+
+	pages := pageTemplates{}
+	if pages.login, err = buildPage("login.html"); err != nil {
+		return err
+	}
+	if pages.changePassword, err = buildPage("change_password.html"); err != nil {
+		return err
+	}
+	if pages.clients, err = buildPage("clients.html"); err != nil {
+		return err
+	}
+	// client detail needs layout + client_detail template
+	// (still uses "content" name, so it must be isolated too).
+	if pages.clientDetail, err = buildPage("client_detail.html"); err != nil {
+		return err
+	}
+
 	mux.HandleFunc("/console/login", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
-			_ = tpl.ExecuteTemplate(w, "login", nil)
+			_ = pages.login.ExecuteTemplate(w, "login", map[string]any{"ShowNav": false})
 			return
 		}
 		if r.Method == http.MethodPost {
 			_ = r.ParseForm()
-			pwd := r.FormValue("password")
-			if consolePassword != "" && pwd == consolePassword {
-				http.SetCookie(w, &http.Cookie{
-					Name:     "console_session",
-					Value:    sessionValue(consolePassword),
-					Path:     "/",
-					HttpOnly: true,
-					SameSite: http.SameSiteLaxMode,
-				})
+			// Accept both the current template field name and potential legacy ones.
+			pwd := firstNonEmptyFormValue(r, "password", "pwd", "pass")
+			ok, err := h.DB.VerifyConsolePassword(r.Context(), pwd)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if ok {
+				hashStr, err := h.DB.GetConsolePasswordBcrypt(r.Context())
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+				SetConsoleSessionCookie(w, hashStr)
 				http.Redirect(w, r, "/console/clients", http.StatusSeeOther)
 				return
 			}
-			_ = tpl.ExecuteTemplate(w, "login", map[string]any{"Error": "invalid password"})
+			_ = pages.login.ExecuteTemplate(w, "login", map[string]any{"ShowNav": false, "Error": "invalid password"})
 			return
 		}
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	})
+
+	mux.HandleFunc("/console/change-password", RequireConsoleAuth(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			_ = pages.changePassword.ExecuteTemplate(w, "change_password", map[string]any{"ShowNav": true})
+		case http.MethodPost:
+			_ = r.ParseForm()
+			// Accept both the current template field names and potential legacy ones.
+			current := firstNonEmptyFormValue(r, "current_password", "currentPassword")
+			newPwd := firstNonEmptyFormValue(r, "new_password", "newPassword")
+			confirm := firstNonEmptyFormValue(r, "confirm_password", "confirmPassword", "confirm")
+			if newPwd != confirm {
+				_ = pages.changePassword.ExecuteTemplate(w, "change_password", map[string]any{"ShowNav": true, "Error": "new passwords do not match"})
+				return
+			}
+			ok, err := h.DB.VerifyConsolePassword(r.Context(), current)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if !ok {
+				_ = pages.changePassword.ExecuteTemplate(w, "change_password", map[string]any{"ShowNav": true, "Error": "current password is incorrect"})
+				return
+			}
+			if err := h.DB.SetConsolePassword(r.Context(), newPwd); err != nil {
+				_ = pages.changePassword.ExecuteTemplate(w, "change_password", map[string]any{"ShowNav": true, "Error": err.Error()})
+				return
+			}
+			hashStr, err := h.DB.GetConsolePasswordBcrypt(r.Context())
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			SetConsoleSessionCookie(w, hashStr)
+			http.Redirect(w, r, "/console/clients", http.StatusSeeOther)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	}, token, h.DB, consoleAuthDisabled))
 
 	mux.HandleFunc("/console/clients", RequireConsoleAuth(func(w http.ResponseWriter, r *http.Request) {
 		clients, err := h.DB.ListClients(r.Context())
@@ -62,8 +138,8 @@ func (h *ConsoleHandler) Register(mux *http.ServeMux, token string) error {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		_ = tpl.ExecuteTemplate(w, "clients", map[string]any{"Clients": clients})
-	}, token, consolePassword))
+		_ = pages.clients.ExecuteTemplate(w, "clients", map[string]any{"Clients": clients, "ShowNav": true})
+	}, token, h.DB, consoleAuthDisabled))
 
 	mux.HandleFunc("/console/clients/", RequireConsoleAuth(func(w http.ResponseWriter, r *http.Request) {
 		clientID := strings.TrimPrefix(r.URL.Path, "/console/clients/")
@@ -100,19 +176,22 @@ func (h *ConsoleHandler) Register(mux *http.ServeMux, token string) error {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		_ = tpl.ExecuteTemplate(w, "client_detail", map[string]any{
+		_ = pages.clientDetail.ExecuteTemplate(w, "client_detail", map[string]any{
 			"ClientID":    clientID,
 			"Screenshots": shots,
 			"Page":        page,
+			"ShowNav":     true,
 		})
-	}, token, consolePassword))
+	}, token, h.DB, consoleAuthDisabled))
 
 	return nil
 }
 
-func getenv(k, d string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
+func firstNonEmptyFormValue(r *http.Request, keys ...string) string {
+	for _, k := range keys {
+		if v := strings.TrimSpace(r.FormValue(k)); v != "" {
+			return v
+		}
 	}
-	return d
+	return ""
 }

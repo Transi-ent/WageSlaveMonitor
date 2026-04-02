@@ -25,6 +25,7 @@ This MVP is for authorized endpoint operations/audit scenarios only.
 - `GET /api/v1/clients/{clientId}/screenshots?page=1`
 - `GET /console/clients`
 - `GET /console/clients/{clientId}`
+- `GET|POST /console/login`, `GET|POST /console/change-password` (default console password `123456` until changed; stored in SQLite)
 
 ## Storage
 

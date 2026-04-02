@@ -12,22 +12,27 @@ go build -o wageslave-server ./cmd/server
 ```bash
 sudo mkdir -p /opt/wageslave/data
 sudo mkdir -p /opt/wageslave/bin
+sudo mkdir -p /opt/wageslave/config
 sudo cp wageslave-server /opt/wageslave/bin/
 ```
 
-## 3) Environment
+## 3) Configuration
 
-Create `/etc/wageslave.env`:
+Create `/opt/wageslave/config/config.json`:
 
-```bash
-ADDR=:8080
-DATA_DIR=/opt/wageslave/data
-DB_PATH=/opt/wageslave/data/meta.db
-AUTH_TOKEN=replace_with_strong_token
-CONSOLE_PASSWORD=replace_with_console_password
-DEFAULT_CAPTURE_INTERVAL_SECONDS=30
-RETENTION_DAYS=14
+```json
+{
+  "ADDR": ":8080",
+  "DATA_DIR": "/opt/wageslave/data",
+  "DB_PATH": "/opt/wageslave/data/meta.db",
+  "AUTH_TOKEN": "replace_with_strong_token",
+  "DEFAULT_CAPTURE_INTERVAL_SECONDS": 30,
+  "RETENTION_DAYS": 14,
+  "CONSOLE_AUTH_DISABLED": false
+}
 ```
+
+**Note:** Set `CONSOLE_AUTH_DISABLED` to `true` for initial testing (no login required). Set to `false` to enable password protection (default password is `123456`).
 
 ## 4) systemd
 
@@ -40,7 +45,6 @@ After=network.target
 
 [Service]
 Type=simple
-EnvironmentFile=/etc/wageslave.env
 WorkingDirectory=/opt/wageslave
 ExecStart=/opt/wageslave/bin/wageslave-server
 Restart=always
@@ -49,6 +53,8 @@ RestartSec=3
 [Install]
 WantedBy=multi-user.target
 ```
+
+The server will automatically read `/opt/wageslave/config/config.json`.
 
 Enable and start:
 
@@ -66,3 +72,15 @@ curl http://127.0.0.1:8080/healthz
 ```
 
 Should return `ok`.
+
+## Configuration Reference
+
+| Field | Description |
+|-------|-------------|
+| `ADDR` | Listen address, e.g., `:8080` or `127.0.0.1:8080`. |
+| `DATA_DIR` | Root directory for screenshots and SQLite DB. |
+| `DB_PATH` | Full path to SQLite database file. |
+| `AUTH_TOKEN` | Bearer token for client API authentication (optional). |
+| `DEFAULT_CAPTURE_INTERVAL_SECONDS` | Default screenshot interval for new clients. |
+| `RETENTION_DAYS` | Auto-delete screenshots older than N days. |
+| `CONSOLE_AUTH_DISABLED` | `true` to disable login, `false` to require password. |

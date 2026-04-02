@@ -1,0 +1,29 @@
+{{define "clients"}}
+{{template "layout" .}}
+{{end}}
+
+{{define "content"}}
+<h1>Clients</h1>
+<table>
+  <thead>
+    <tr>
+      <th>Client ID</th>
+      <th>Last Seen</th>
+      <th>Last Captured</th>
+      <th>Count</th>
+      <th>Interval(s)</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{range .Clients}}
+    <tr>
+      <td><a href="/console/clients/{{.ClientID}}">{{.ClientID}}</a></td>
+      <td>{{.LastSeenAt}}</td>
+      <td>{{.LastCapturedAt}}</td>
+      <td>{{.ScreenshotCount}}</td>
+      <td>{{.CaptureIntervalS}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{end}}

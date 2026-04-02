@@ -1,0 +1,24 @@
+{{define "client_detail"}}
+{{template "layout" .}}
+{{end}}
+
+{{define "content"}}
+<h1>Client {{.ClientID}}</h1>
+<p><a href="/console/clients">Back</a></p>
+
+<form method="post" action="/console/clients/{{.ClientID}}/config">
+  <label>Capture interval seconds:</label>
+  <input name="capture_interval_seconds" type="number" min="5" value="30" />
+  <button type="submit">Update</button>
+</form>
+
+<h2>Screenshots</h2>
+<div class="grid">
+  {{range .Screenshots}}
+  <div>
+    <div>{{.CapturedAt}} | monitor {{.MonitorIndex}}</div>
+    <img src="/data/{{.RelativePath}}" alt="screenshot" />
+  </div>
+  {{end}}
+</div>
+{{end}}

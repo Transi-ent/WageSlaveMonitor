@@ -1,0 +1,48 @@
+# --- Go ---
+/bin/
+/dist/
+/build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.out
+coverage.html
+vendor/
+
+# --- Server runtime data (do not commit) ---
+data/
+**/meta.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# --- Client runtime data ---
+agent-data/
+
+# --- Environment & secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# --- Editors / IDEs ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- Logs & temp ---
+*.log
+tmp/
+temp/
